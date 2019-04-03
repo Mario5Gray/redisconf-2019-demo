@@ -3,21 +3,20 @@ package com.redisconf.demo
 import org.hamcrest.Matcher
 import org.hamcrest.MatcherAssert
 import org.hamcrest.Matchers
-import org.junit.Test
-import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.extension.ExtendWith
-import org.junit.runner.RunWith
 import org.reactivestreams.Publisher
 import org.springframework.boot.test.autoconfigure.data.redis.DataRedisTest
-import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.context.annotation.Import
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.ReactiveRedisTemplate
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.data.redis.listener.ChannelTopic
 import org.springframework.test.context.junit.jupiter.SpringExtension
-import org.springframework.test.context.junit4.SpringRunner
 import reactor.core.publisher.DirectProcessor
 import reactor.core.publisher.Flux
 import reactor.test.StepVerifier
@@ -30,128 +29,128 @@ import java.util.concurrent.atomic.AtomicLong
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RedisDemoTests {
 
-	val log: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(RedisDemoTests::class.java)
+    val log: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger(RedisDemoTests::class.java)
 
-	private val port = 6777
+    private val port = 6777
 
-	private lateinit var redisServer: RedisServer
+    private lateinit var redisServer: RedisServer
 
-	private lateinit var lettuce: LettuceConnectionFactory
+    private lateinit var lettuce: LettuceConnectionFactory
 
-	private lateinit var template: ReactiveRedisTemplate<String, String>
+    private lateinit var template: ReactiveRedisTemplate<String, String>
 
-	@BeforeAll
-	fun setupRedis() {
-		redisServer = RedisServer(port)
+    @BeforeEach
+    fun setupRedis() {
+        redisServer = RedisServer(port)
 
-		redisServer.start()
+        redisServer.start()
 
-		lettuce = LettuceConnectionFactory(RedisStandaloneConfiguration("127.0.0.1", port))
+        lettuce = LettuceConnectionFactory(RedisStandaloneConfiguration("127.0.0.1", port))
 
-		lettuce.afterPropertiesSet()
+        lettuce.afterPropertiesSet()
 
-		template = RedisDemoConfig().stringCache(lettuce)
-	}
+        template = ReactiveStringRedisTemplate(lettuce) //RedisDemoConfig().stringCache(lettuce)
+    }
 
-	@AfterAll
-	fun tearDown() = redisServer.stop()
+    @AfterEach
+    fun tearDown() = redisServer.stop()
 
-	private val valueMatcher: Matcher<String> = Matchers
-			.allOf(
-					Matchers.notNullValue(),
-					Matchers.equalToIgnoringCase("1234")
-			)
+    private val valueMatcher: Matcher<String> = Matchers
+            .allOf(
+                    Matchers.notNullValue(),
+                    Matchers.equalToIgnoringCase("1234")
+            )
 
-	@Test
-	fun testShouldPing() {
+    @Test
+    fun testShouldPing() {
 
-		val ping = template.connectionFactory.reactiveConnection.ping()
+        val ping = template.connectionFactory.reactiveConnection.ping()
 
-		StepVerifier
-				.create(ping)
-				.expectSubscription()
-				.expectNext("PONG")
-				.verifyComplete()
-	}
+        StepVerifier
+                .create(ping)
+                .expectSubscription()
+                .expectNext("PONG")
+                .verifyComplete()
+    }
 
-	@Test
-	fun testShouldSetGet() {
-		val cachePut: Publisher<Boolean> =
-				template.opsForValue()
-						.set("TEST", "1234")
+    @Test
+    fun testShouldSetGet() {
+        val cachePut: Publisher<Boolean> =
+                template.opsForValue()
+                        .set("TEST", "1234")
 
-		val cacheGet: Publisher<String> =
-				template.opsForValue()
-						.get("TEST")
+        val cacheGet: Publisher<String> =
+                template.opsForValue()
+                        .get("TEST")
 
-		val setAndGet = Flux.from(cachePut).thenMany(cacheGet)
+        val setAndGet = Flux.from(cachePut).thenMany(cacheGet)
 
-		StepVerifier
-				.create(setAndGet)
-				.expectSubscription()
-				.assertNext { t ->
-					MatcherAssert.assertThat("Receives Value for Key", t, valueMatcher)
-				}
-				.verifyComplete()
-	}
+        StepVerifier
+                .create(setAndGet)
+                .expectSubscription()
+                .assertNext { t ->
+                    MatcherAssert.assertThat("Receives Value for Key", t, valueMatcher)
+                }
+                .verifyComplete()
+    }
 
 
-	@Test
-	fun testShouldPubSubSendReceive() {
-		val topic = "TEST"
+    @Test
+    fun testShouldPubSubSendReceive() {
+        val topic = "TEST"
 
-		val processor: DirectProcessor<String> = DirectProcessor.create()
+        val processor: DirectProcessor<String> = DirectProcessor.create()
 
-		// destination for pubsubSub data
-		val pubSubDataFlux = processor
-				.onBackpressureBuffer()
-				.handle<String> { r, sink ->
-					sink.next(r)
-				}
-				.publish()
-				.autoConnect()
+        // destination for pubsubSub data
+        val pubSubDataFlux = processor
+                .onBackpressureBuffer()
+                .handle<String> { r, sink ->
+                    sink.next(r)
+                }
+                .publish()
+                .autoConnect()
 
-		// writes to channel
-		val writerFlux = template.convertAndSend(topic, "1234")
-				.repeat(1)
-				.delaySubscription(Duration.ofSeconds(2)) // ENSURE channelListener is activated.
+        // writes to channel
+        val writerFlux = template.convertAndSend(topic, "1234")
+                .repeat(1)
+                .delaySubscription(Duration.ofSeconds(2)) // ENSURE channelListener is activated.
 
-		val tcnt = AtomicLong(2)
+        val tcnt = AtomicLong(2)
 
-		// Listen to channel
-		val channelSubFlux = template
-				.listenTo(ChannelTopic(topic))
-				.doOnNext {
-					processor.onNext(it.message)
-				}
-				.handle<String> { _, sink ->
-					if (tcnt.decrementAndGet() == 0L) {
-						sink.complete()
-					}
-				}
+        // Listen to channel
+        val channelSubFlux = template
+                .listenTo(ChannelTopic(topic))
+                .doOnNext {
+                    processor.onNext(it.message)
+                }
+                .handle<String> { _, sink ->
+                    if (tcnt.decrementAndGet() == 0L) {
+                        sink.complete()
+                    }
+                }
 
-		Flux
-				.merge(
-						channelSubFlux,
-						writerFlux
-				)
-				.delaySubscription(Duration.ofSeconds(1)) // ensure pubSubData is subscribed first
-				.subscribe()
+        Flux
+                .merge(
+                        channelSubFlux,
+                        writerFlux
+                )
+                .delaySubscription(Duration.ofSeconds(1)) // ensure pubSubData is subscribed first
+                .subscribe()
 
-		StepVerifier
-				.create(pubSubDataFlux
-						.take(2)
-						.doOnNext { log.info("N= $it") }
-				)
-				.expectSubscription()
-				.assertNext { t ->
-					MatcherAssert.assertThat("Receives Value for Key", t, valueMatcher)
-				}
-				.assertNext { t ->
-					MatcherAssert.assertThat("Receives Value for Key", t, valueMatcher)
-				}
-				.expectComplete()
-				.verify(Duration.ofSeconds(5))
-	}
+        StepVerifier
+                .create(pubSubDataFlux
+                        .take(2)
+                        .doOnNext { log.info("N= $it") }
+                )
+                .expectSubscription()
+                .assertNext { t ->
+                    MatcherAssert.assertThat("Receives Value for Key", t, valueMatcher)
+                }
+                .assertNext { t ->
+                    MatcherAssert.assertThat("Receives Value for Key", t, valueMatcher)
+                }
+                .expectComplete()
+                .verify(Duration.ofSeconds(5))
+    }
 
 }

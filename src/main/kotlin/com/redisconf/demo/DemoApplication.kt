@@ -40,7 +40,8 @@ class DemoApplication {
 		log.info(":::_" + title.toUpperCase() + "_:::")
 		return ApplicationRunner { args -> ar.run(args) }
 	}
-	@Bean
+
+	//@Bean
 	fun cacheSmokeDemo(messageCache: ReactiveRedisTemplate<String, Message>,
 					   idCache: ReactiveRedisTemplate<String, String>): ApplicationRunner {
 
