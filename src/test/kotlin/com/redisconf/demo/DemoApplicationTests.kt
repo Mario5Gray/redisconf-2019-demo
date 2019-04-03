@@ -74,4 +74,27 @@ class RedisDemoTests {
 				.verifyComplete()
 	}
 
+	@Test
+	fun testShouldSetGet() {
+		val cachePut: Publisher<Boolean> =
+				template.opsForValue()
+						.set("TEST", "1234")
+
+		val cacheGet: Publisher<String> =
+				template.opsForValue()
+						.get("TEST")
+
+		val setAndGet = Flux.from(cachePut).thenMany(cacheGet)
+
+		StepVerifier
+				.create(setAndGet)
+				.expectSubscription()
+				.assertNext { t ->
+					MatcherAssert.assertThat("Receives Value for Key", t, valueMatcher)
+				}
+				.verifyComplete()
+	}
+
+
+
 }
